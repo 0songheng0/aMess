@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Family Messenger</string>
+    <string name="login">Login</string>
+    <string name="register">Register</string>
+    <string name="email">Email</string>
+    <string name="password">Password</string>
+    <string name="confirm_password">Confirm Password</string>
+    <string name="display_name">Display Name</string>
+    <string name="dont_have_account">Don\'t have an account? Register</string>
+    <string name="already_have_account">Already have an account? Login</string>
+    <string name="logout">Logout</string>
+    <string name="chats">Chats</string>
+    <string name="type_message">Type a message...</string>
+    <string name="send">Send</string>
+    <string name="no_chats">No chats yet. Start a conversation with family members!</string>
+    <string name="error_fields_required">All fields are required</string>
+    <string name="error_passwords_dont_match">Passwords don\'t match</string>
+    <string name="error_login_failed">Login failed. Please check your credentials.</string>
+    <string name="error_registration_failed">Registration failed. Please try again.</string>
+    <string name="new_message">New message</string>
+    <string name="loading">Loading...</string>
+    <string name="search_family_members">Search family members...</string>
+    <string name="new_chat">New Chat</string>
+</resources>
