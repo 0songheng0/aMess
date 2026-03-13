@@ -178,23 +178,25 @@ Based on the note type, format the content using the templates below. Fill in to
 
 ## Step 5 — Save the note
 
-After formatting, tell the user the note is ready and show them the formatted content.
+After formatting, show the user the formatted note content.
 
-Then run the save script:
+Then save in this exact order:
 
+**1. Get the save path** — run the script:
 ```bash
-bash scripts/note-save.sh "{type}" "{slugified-title}" "{YYYY-MM-DD}"
+bash scripts/note-save.sh "{type}" "{title}" "{YYYY-MM-DD}"
 ```
+The script outputs the full relative path, e.g. `notes/meetings/2026-03-13-sprint-planning.md`.
 
-Then write the note content to the path the script outputs (it will be `notes/{type}/YYYY-MM-DD-{slug}.md`).
+**2. Write the file** — use the Write tool to write the formatted note content to that exact path.
 
-After saving, run:
+**3. Commit** — only after confirming the file was written:
 ```bash
 git add notes/
 git commit -m "note({type}): {title} [{DATE}]"
 ```
 
-Confirm to the user: "Saved to `notes/{type}/YYYY-MM-DD-{slug}.md` and committed."
+Confirm to the user: "Saved to `{output-path}` and committed."
 
 ---
 

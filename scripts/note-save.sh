@@ -9,10 +9,14 @@ TYPE="${1:-quick}"
 TITLE="${2:-untitled}"
 DATE="${3:-$(date +%Y-%m-%d)}"
 
-# Validate type
+# Map type to plural folder name
 case "$TYPE" in
-  meeting|minutes|instruction|discussion|quick) ;;
-  *) TYPE="quick" ;;
+  meeting)     FOLDER="meetings" ;;
+  minutes)     FOLDER="minutes" ;;
+  instruction) FOLDER="instructions" ;;
+  discussion)  FOLDER="discussions" ;;
+  quick)       FOLDER="quick" ;;
+  *)           FOLDER="quick" ;;
 esac
 
 # Slugify title: lowercase, spaces/special chars → hyphens, trim
@@ -23,9 +27,9 @@ SLUG=$(echo "$TITLE" \
   | sed 's/^-//;s/-$//')
 
 FILENAME="${DATE}-${SLUG}.md"
-OUTPUT_PATH="notes/${TYPE}/${FILENAME}"
+OUTPUT_PATH="notes/${FOLDER}/${FILENAME}"
 
 # Ensure directory exists
-mkdir -p "notes/${TYPE}"
+mkdir -p "notes/${FOLDER}"
 
 echo "$OUTPUT_PATH"
