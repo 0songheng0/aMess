@@ -88,9 +88,9 @@ related: []
 {bullet list or —}
 
 ## Action Items
-| Action | Owner | Due | Status |
-|--------|-------|-----|--------|
-| ...    | ...   | ... | Open   |
+| Action | Owner | Due | Priority | Status |
+|--------|-------|-----|----------|--------|
+| ...    | ...   | ... | Medium   | Open   |
 
 ## Notes
 {any extra context or —}
@@ -132,9 +132,9 @@ related: []
 {numbered list of decisions made, each with brief rationale}
 
 ## Action Items
-| # | Action | Owner | Due Date | Status |
-|---|--------|-------|----------|--------|
-| 1 | ...    | ...   | ...      | Open   |
+| # | Action | Owner | Due Date | Priority | Status |
+|---|--------|-------|----------|----------|--------|
+| 1 | ...    | ...   | ...      | Medium   | Open   |
 
 ## Next Meeting
 **Date:** {or TBD}
@@ -225,9 +225,9 @@ related: []
 - {question or —}
 
 ## Follow-ups
-| Follow-up | Owner | By When | Status |
-|-----------|-------|---------|--------|
-| ...       | ...   | ...     | Open   |
+| Follow-up | Owner | By When | Priority | Status |
+|-----------|-------|---------|----------|--------|
+| ...       | ...   | ...     | Medium   | Open   |
 ```
 
 ---
@@ -302,3 +302,5 @@ git commit -m "note({type}): {title} [{DATE}]"
 - If the user provides all info upfront in the `/note` invocation arguments, skip Steps 1–3
 - If the user says "quick" or provides no type, default to `quick`
 - Always populate YAML frontmatter — it enables search, index, and action tracking
+- Action item **Status** values: `Open` / `In Progress` / `Blocked` / `Done` — use `Open` as the default for new items
+- Action item **Priority** values: `High` / `Medium` / `Low` — use `Medium` as the default

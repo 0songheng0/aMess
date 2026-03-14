@@ -1,151 +1,183 @@
 #!/usr/bin/env bash
-# note-actions.sh — extract open action items from all notes
-# Usage: bash scripts/note-actions.sh [--owner <name>] [--overdue]
-# Scans meeting and minutes notes for action table rows with status "Open"
+# note-actions.sh — extract active action items from all notes
+# Usage: bash scripts/note-actions.sh [--owner <name>] [--overdue] [--priority <high|medium|low>]
+# Groups by status: Blocked → In Progress → Open
+# Sorts by priority within each group: High → Medium → Low
+# Flags overdue and due-soon items
 
 set -euo pipefail
 
 NOTES_DIR="notes"
 FILTER_OWNER=""
 FILTER_OVERDUE=false
+FILTER_PRIORITY=""
 TODAY=$(date +%Y-%m-%d)
 
-# ---- parse args -------------------------------------------------------------
+# ---- parse args ---------------------------------------------------------------
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --owner)  FILTER_OWNER="$2"; shift 2 ;;
-    --overdue) FILTER_OVERDUE=true; shift ;;
+    --owner)    FILTER_OWNER="$2"; shift 2 ;;
+    --overdue)  FILTER_OVERDUE=true; shift ;;
+    --priority) FILTER_PRIORITY="${2,,}"; shift 2 ;;
     *) shift ;;
   esac
 done
 
-# ---- helpers ----------------------------------------------------------------
+# ---- helpers ------------------------------------------------------------------
 
 parse_field() {
   local field="$1" file="$2"
-  awk '/^---/{found++; next} found==1 && /^'"$field"':/{sub(/^[^:]+: */,""); print; exit}' "$file"
+  awk '/^---/{found++; next} found>1{exit} found==1 && /^'"$field"':/{sub(/^[^:]+: */,""); print; exit}' "$file"
 }
 
-# Parse a date string yyyy-mm-dd for comparison; returns empty if not a valid date
 normalize_date() {
-  local d="$1"
-  if [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-    echo "$d"
+  [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && echo "$1" || echo ""
+}
+
+urgency_marker() {
+  local due_norm
+  due_norm=$(normalize_date "$1")
+  [[ -z "$due_norm" ]] && return 0
+  if [[ "$due_norm" < "$TODAY" ]]; then
+    echo "⚠ OVERDUE"
   else
-    echo ""
+    local cutoff
+    cutoff=$(date -d "${TODAY} +3 days" +%Y-%m-%d 2>/dev/null \
+      || python3 -c "from datetime import date,timedelta; print(date.fromisoformat('${TODAY}')+timedelta(days=3))" 2>/dev/null \
+      || echo "")
+    [[ -n "$cutoff" && "$due_norm" <= "$cutoff" ]] && echo "→ DUE SOON" || true
   fi
 }
 
-# ---- collect actions --------------------------------------------------------
+priority_rank() {
+  case "${1,,}" in high) echo 1;; medium) echo 2;; low) echo 3;; *) echo 2;; esac
+}
 
-declare -A OWNER_ACTIONS  # owner -> newline-separated action lines
+status_rank() {
+  case "${1,,}" in blocked) echo 1;; "in progress") echo 2;; *) echo 3;; esac
+}
+
+# ---- collect actions ----------------------------------------------------------
+
+# Each entry: "srank|prank|owner|formatted_line"
+ALL_LINES=()
 
 while IFS= read -r f; do
   type=$(parse_field "type" "$f")
   title=$(parse_field "title" "$f")
-  date=$(parse_field "date" "$f")
+  note_date=$(parse_field "date" "$f")
   [[ -z "$title" ]] && title=$(basename "$f" .md)
 
-  # Only process types that have action tables
   [[ "$type" == "meeting" || "$type" == "minutes" || "$type" == "discussion" ]] || continue
 
-  # Extract table rows that contain "Open" status
-  # Table format: | Action | Owner | Due | Status | (meeting) or | # | Action | Owner | Due | Status | (minutes)
   while IFS= read -r row; do
-    # Skip header rows and separator rows
+    # Skip separator and header rows
     [[ "$row" =~ ^[[:space:]]*\|[[:space:]]*[-:] ]] && continue
-    [[ "$row" =~ Action.*Owner ]] && continue
-    [[ "$row" =~ ^[[:space:]]*#[[:space:]]*\| ]] && continue
+    [[ "$row" =~ \|[[:space:]]*(Action|Follow-up|#)[[:space:]]*\| ]] && continue
 
-    # Must contain "Open"
-    echo "$row" | grep -qi "open" || continue
-
-    # Parse columns by splitting on |
     IFS='|' read -ra cols <<< "$row"
-    # Remove empty first/last from leading/trailing |
     local_cols=()
     for c in "${cols[@]}"; do
-      trimmed=$(echo "$c" | xargs)
-      local_cols+=("$trimmed")
+      t=$(echo "$c" | xargs)
+      [[ -n "$t" ]] && local_cols+=("$t")
     done
-
-    # Determine column layout
-    # meeting:  | Action | Owner | Due | Status |        → 4 data cols
-    # minutes:  | # | Action | Owner | Due Date | Status | → 5 data cols
-    # discussion: | Follow-up | Owner | By When | Status | → 4 data cols
     ncols=${#local_cols[@]}
+    [[ $ncols -lt 4 ]] && continue
 
-    if [[ $ncols -ge 5 ]]; then
-      # minutes style: col1=# col2=action col3=owner col4=due col5=status
-      action="${local_cols[1]}"
-      owner="${local_cols[2]}"
-      due="${local_cols[3]}"
-    elif [[ $ncols -ge 4 ]]; then
-      # meeting/discussion style: col1=action col2=owner col3=due col4=status
-      action="${local_cols[0]}"
-      owner="${local_cols[1]}"
-      due="${local_cols[2]}"
+    # Detect column layout:
+    # 6 cols — minutes + priority:            # | action | owner | due | priority | status
+    # 5 cols, first is digit — minutes:       # | action | owner | due | status
+    # 5 cols, first is text — meeting+prio:   action | owner | due | priority | status
+    # 4 cols — meeting/discussion (legacy):   action | owner | due | status
+    action="" owner="" due="" priority="Medium" status=""
+
+    if [[ $ncols -ge 6 ]]; then
+      action="${local_cols[1]}"; owner="${local_cols[2]}"; due="${local_cols[3]}"
+      priority="${local_cols[4]}"; status="${local_cols[5]}"
+    elif [[ $ncols -eq 5 ]]; then
+      if [[ "${local_cols[0]}" =~ ^[0-9]+$ ]]; then
+        action="${local_cols[1]}"; owner="${local_cols[2]}"; due="${local_cols[3]}"; status="${local_cols[4]}"
+      else
+        action="${local_cols[0]}"; owner="${local_cols[1]}"; due="${local_cols[2]}"
+        priority="${local_cols[3]}"; status="${local_cols[4]}"
+      fi
     else
-      continue
+      action="${local_cols[0]}"; owner="${local_cols[1]}"; due="${local_cols[2]}"; status="${local_cols[3]}"
     fi
 
+    # Skip placeholder rows and done items — only keep active statuses
     [[ -z "$action" || "$action" == "..." ]] && continue
+    [[ "$action" =~ ^(Action|Follow-up)$ ]] && continue
+    echo "$status" | grep -qiE "^(open|in progress|blocked)$" || continue
 
-    # Apply owner filter
-    if [[ -n "$FILTER_OWNER" ]]; then
-      echo "$owner" | grep -qi "$FILTER_OWNER" || continue
-    fi
+    # Apply filters
+    [[ -n "$FILTER_OWNER" ]] && ! echo "$owner" | grep -qi "$FILTER_OWNER" && continue
+    [[ -n "$FILTER_PRIORITY" ]] && [[ "${priority,,}" != "$FILTER_PRIORITY" ]] && continue
 
-    # Apply overdue filter
     if [[ "$FILTER_OVERDUE" == true ]]; then
       due_norm=$(normalize_date "$due")
-      if [[ -z "$due_norm" || "$due_norm" > "$TODAY" || "$due_norm" == "$TODAY" ]]; then
-        continue
-      fi
+      { [[ -z "$due_norm" ]] || [[ "$due_norm" >= "$TODAY" ]]; } && continue
     fi
 
-    # Normalize owner
-    [[ -z "$owner" || "$owner" == "—" ]] && owner="Unassigned"
+    [[ -z "$owner"    || "$owner"    == "—" ]] && owner="Unassigned"
+    [[ -z "$priority" || "$priority" == "—" ]] && priority="Medium"
 
-    note_ref="[${title}](${f#notes/}) (${date})"
-    line="  - [ ] ${action} — ${note_ref} — due: ${due:-TBD}"
+    urgency=$(urgency_marker "$due")
+    note_ref="[${title}](${f#notes/}) (${note_date})"
 
-    if [[ -v OWNER_ACTIONS[$owner] ]]; then
-      OWNER_ACTIONS[$owner]+=$'\n'"$line"
-    else
-      OWNER_ACTIONS[$owner]="$line"
-    fi
+    # Build formatted line
+    prefix=""
+    [[ -n "$urgency" ]] && prefix="${urgency} — "
+
+    line="- [ ] ${prefix}**[${priority}]** ${action} — ${owner} — due: ${due:-TBD} — ${note_ref}"
+
+    srank=$(status_rank "$status")
+    prank=$(priority_rank "$priority")
+    # Use a safe separator that won't appear in paths/titles
+    ALL_LINES+=("${srank}${CHAR_SEP:-|}${prank}${CHAR_SEP:-|}${owner}${CHAR_SEP:-|}${line}")
 
   done < <(grep -P '^\s*\|' "$f" 2>/dev/null || true)
 
 done < <(find "$NOTES_DIR" -name "*.md" ! -name ".gitkeep" ! -name "INDEX.md" | sort)
 
-# ---- output -----------------------------------------------------------------
+# ---- output -------------------------------------------------------------------
 
-if [[ ${#OWNER_ACTIONS[@]} -eq 0 ]]; then
-  echo "No open action items found."
+if [[ ${#ALL_LINES[@]} -eq 0 ]]; then
+  echo "No active action items found."
   exit 0
 fi
 
-echo "## Open Action Items"
+echo "## Active Action Items"
 echo ""
 
-if [[ "$FILTER_OVERDUE" == true ]]; then
-  echo "> Showing **overdue** items only (before ${TODAY})"
-  echo ""
-fi
+[[ "$FILTER_OVERDUE"  == true ]] && echo "> Showing **overdue** items only (before ${TODAY})" && echo ""
+[[ -n "$FILTER_OWNER"   ]] && echo "> Filtered by owner: **${FILTER_OWNER}**" && echo ""
+[[ -n "$FILTER_PRIORITY" ]] && echo "> Filtered by priority: **${FILTER_PRIORITY^}**" && echo ""
 
-if [[ -n "$FILTER_OWNER" ]]; then
-  echo "> Filtered by owner: **${FILTER_OWNER}**"
-  echo ""
-fi
+echo "> Legend: ⚠ OVERDUE · → DUE SOON · Priority shown as [High/Medium/Low]"
+echo ""
 
-# Sort owners alphabetically
-mapfile -t SORTED_OWNERS < <(printf '%s\n' "${!OWNER_ACTIONS[@]}" | sort)
+# Sort: status rank asc, priority rank asc, owner alpha
+mapfile -t SORTED_LINES < <(printf '%s\n' "${ALL_LINES[@]}" | sort -t'|' -k1,1n -k2,2n -k3,3)
 
-for owner in "${SORTED_OWNERS[@]}"; do
-  echo "### ${owner}"
-  echo "${OWNER_ACTIONS[$owner]}"
-  echo ""
+declare -A STATUS_LABELS=( [1]="Blocked" [2]="In Progress" [3]="Open" )
+current_srank=""
+
+for entry in "${SORTED_LINES[@]}"; do
+  srank="${entry%%|*}"
+  tmp="${entry#*|}"
+  # prank="${tmp%%|*}"   # not needed for display
+  tmp="${tmp#*|}"
+  # owner="${tmp%%|*}"   # not needed for display
+  line="${tmp#*|}"
+
+  if [[ "$srank" != "$current_srank" ]]; then
+    [[ -n "$current_srank" ]] && echo ""
+    echo "### ${STATUS_LABELS[$srank]}"
+    current_srank="$srank"
+  fi
+  echo "$line"
 done
+
+echo ""

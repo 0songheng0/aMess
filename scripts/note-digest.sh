@@ -9,6 +9,7 @@ NOTES_DIR="notes"
 DAYS=7
 FROM_DATE=""
 TO_DATE=$(date +%Y-%m-%d)
+TODAY=$(date +%Y-%m-%d)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +29,25 @@ fi
 parse_field() {
   local field="$1" file="$2"
   awk '/^---/{found++; next} found==1 && /^'"$field"':/{sub(/^[^:]+: */,""); print; exit}' "$file"
+}
+
+normalize_date() {
+  [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && echo "$1" || echo ""
+}
+
+urgency_marker() {
+  local due_norm
+  due_norm=$(normalize_date "$1")
+  [[ -z "$due_norm" ]] && return 0
+  if [[ "$due_norm" < "$TODAY" ]]; then
+    echo "⚠ OVERDUE"
+  else
+    local cutoff
+    cutoff=$(date -d "${TODAY} +3 days" +%Y-%m-%d 2>/dev/null \
+      || python3 -c "from datetime import date,timedelta; print(date.fromisoformat('${TODAY}')+timedelta(days=3))" 2>/dev/null \
+      || echo "")
+    [[ -n "$cutoff" && "$due_norm" <= "$cutoff" ]] && echo "→ DUE SOON" || true
+  fi
 }
 
 mapfile -t ALL_FILES < <(find "$NOTES_DIR" -name "*.md" ! -name ".gitkeep" ! -name "INDEX.md" | sort -r)
@@ -113,7 +133,10 @@ for f in "${MATCHED_FILES[@]}"; do
       continue
     fi
     [[ -z "$action" || "$action" == "..." ]] && continue
-    echo "- [ ] **${action}** — ${owner:-Unassigned} — due: ${due:-TBD} *(from: ${title}, ${date})*"
+    urgency=$(urgency_marker "$due")
+    prefix=""
+    [[ -n "$urgency" ]] && prefix="**${urgency}** — "
+    echo "- [ ] ${prefix}**${action}** — ${owner:-Unassigned} — due: ${due:-TBD} *(from: ${title}, ${date})*"
     OPEN_COUNT=$((OPEN_COUNT + 1))
   done < <(grep -P '^\s*\|' "$f" 2>/dev/null || true)
 done
